@@ -1,0 +1,46 @@
+﻿@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --tc-cyan: #ede9fe;
+    --tc-cyan-dark: #c4b5fd;
+    --tc-yellow: #ffd433;
+    --tc-yellow-dark: #f0c000;
+    --tc-navy: #1a1a2e;
+    --tc-teal: #7c3aed;
+  }
+  body {
+    font-family: 'Heebo', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    direction: rtl;
+    background-color: #ede9fe;
+  }
+  * {
+    box-sizing: border-box;
+  }
+}
+
+@layer utilities {
+  .seat {
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .seat:hover {
+    transform: scale(1.25);
+  }
+  .btn-yellow {
+    background-color: #ffd433;
+    color: #1a1a2e;
+    font-weight: 700;
+    border-radius: 9999px;
+    transition: background-color 0.15s ease;
+  }
+  .btn-yellow:hover {
+    background-color: #f0c000;
+  }
+  .card-white {
+    background-color: #ffffff;
+    border-radius: 16px;
+    border: 1px solid #f3f0ff;
+  }
+}
