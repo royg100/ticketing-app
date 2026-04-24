@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react';
 import type { CartItem, Seat, Event } from '../types';
 import type { SelectedLecture } from '../data/organizer';
 
@@ -19,27 +19,32 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [selectedLectures, setSelectedLectures] = useState<SelectedLecture[]>([]);
 
-  const addItem = (seat: Seat, event: Event) => {
+  const addItem = useCallback((seat: Seat, event: Event) => {
     setItems(prev => {
       if (prev.find(i => i.seat.id === seat.id)) return prev;
       return [...prev, { seat, event }];
     });
-  };
+  }, []);
 
-  const removeItem = (seatId: string) => {
+  const removeItem = useCallback((seatId: string) => {
     setItems(prev => prev.filter(i => i.seat.id !== seatId));
-  };
+  }, []);
 
-  const clearCart = () => {
+  const clearCart = useCallback(() => {
     setItems([]);
     setSelectedLectures([]);
-  };
+  }, []);
 
-  const total = items.reduce((sum, i) => sum + i.seat.price, 0);
+  const total = useMemo(() => items.reduce((sum, i) => sum + i.seat.price, 0), [items]);
   const count = items.length;
 
+  const value = useMemo(
+    () => ({ items, addItem, removeItem, clearCart, total, count, selectedLectures, setSelectedLectures }),
+    [items, addItem, removeItem, clearCart, total, count, selectedLectures],
+  );
+
   return (
-    <CartContext.Provider value={{ items, addItem, removeItem, clearCart, total, count, selectedLectures, setSelectedLectures }}>
+    <CartContext.Provider value={value}>
       {children}
     </CartContext.Provider>
   );

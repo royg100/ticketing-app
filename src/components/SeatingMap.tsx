@@ -1,4 +1,4 @@
-﻿import { useState, useMemo, useCallback } from 'react';
+﻿import { useState, useMemo, useCallback, useRef, memo } from 'react';
 import type { Seat, SeatTier, Event } from '../types';
 import { useCart } from '../context/CartContext';
 
@@ -60,6 +60,42 @@ const SECTION_LABELS: Record<string, string> = {
   'bronze-back-r': 'אחורי פנימי ימין',
   'bronze-back-ctr': 'אחורי מרכז (שורה 3)',
 };
+
+interface SeatCircleProps {
+  seat: SeatDef;
+  isTaken: boolean;
+  isSelected: boolean;
+  fill: string;
+  onClick: (seat: SeatDef) => void;
+  onMouseEnter: (seat: SeatDef) => void;
+  onMouseLeave: () => void;
+}
+
+const SeatCircle = memo(function SeatCircle({
+  seat,
+  isTaken,
+  isSelected,
+  fill,
+  onClick,
+  onMouseEnter,
+  onMouseLeave,
+}: SeatCircleProps) {
+  return (
+    <circle
+      cx={seat.cx}
+      cy={seat.cy}
+      r={4.4}
+      fill={fill}
+      opacity={isTaken ? 0.28 : 1}
+      stroke={isSelected ? '#fff' : 'none'}
+      strokeWidth={isSelected ? 1.5 : 0}
+      className={isTaken ? 'cursor-not-allowed' : 'seat cursor-pointer'}
+      onClick={() => onClick(seat)}
+      onMouseEnter={() => onMouseEnter(seat)}
+      onMouseLeave={onMouseLeave}
+    />
+  );
+});
 
 // Deterministic seeded RNG (mulberry32)
 function makeRng(seed: number) {
@@ -166,6 +202,8 @@ export default function SeatingMap({ event, tierPrices, useDemoPriceTable }: Sea
 
   const { items, addItem, removeItem } = useCart();
   const selectedIds = useMemo(() => new Set(items.map(i => i.seat.id)), [items]);
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
 
   const [tooltip, setTooltip] = useState<{
     seat: SeatDef;
@@ -176,26 +214,33 @@ export default function SeatingMap({ event, tierPrices, useDemoPriceTable }: Sea
   const handleClick = useCallback(
     (seat: SeatDef) => {
       if (takenIds.has(seat.id)) return;
+      const isSelected = selectedIdsRef.current.has(seat.id);
       const s: Seat = {
         id: seat.id,
         row: seat.row,
         number: seat.number,
         section: seat.section,
         tier: seat.tier,
-        status: selectedIds.has(seat.id) ? 'selected' : 'available',
+        status: isSelected ? 'selected' : 'available',
         price: seat.price,
       };
-      if (selectedIds.has(seat.id)) removeItem(seat.id);
+      if (isSelected) removeItem(seat.id);
       else addItem(s, event);
     },
-    [takenIds, selectedIds, addItem, removeItem, event],
+    [takenIds, addItem, removeItem, event],
   );
 
-  const getSeatFill = (seat: SeatDef) => {
+  const handleMouseEnter = useCallback((seat: SeatDef) => {
+    setTooltip({ seat, svgX: seat.cx, svgY: seat.cy });
+  }, []);
+
+  const handleMouseLeave = useCallback(() => setTooltip(null), []);
+
+  const getSeatFill = useCallback((seat: SeatDef) => {
     if (takenIds.has(seat.id)) return '#b8a9d0';
-    if (selectedIds.has(seat.id)) return '#e94560';
+    if (selectedIdsRef.current.has(seat.id)) return '#e94560';
     return TIER_HEX[seat.tier];
-  };
+  }, [takenIds]);
 
   // Ground/GA area bounds (SVG units)
   const GROUND = { x: 220, y: 136, w: 304, h: 134 };
@@ -289,28 +334,18 @@ export default function SeatingMap({ event, tierPrices, useDemoPriceTable }: Sea
         <text x="381" y="271" textAnchor="middle" fill="#34d399" fontSize="7.5" fontWeight="700">ברונזה אחורי — שורה 3</text>
 
         {/* ── Seats ─────────────────────────────────────────── */}
-        {allSeats.map(seat => {
-          const taken = takenIds.has(seat.id);
-          const selected = selectedIds.has(seat.id);
-          return (
-            <circle
-              key={seat.id}
-              cx={seat.cx}
-              cy={seat.cy}
-              r={4.4}
-              fill={getSeatFill(seat)}
-              opacity={taken ? 0.28 : 1}
-              stroke={selected ? '#fff' : 'none'}
-              strokeWidth={selected ? 1.5 : 0}
-              className={taken ? 'cursor-not-allowed' : 'seat cursor-pointer'}
-              onClick={() => handleClick(seat)}
-              onMouseEnter={() =>
-                setTooltip({ seat, svgX: seat.cx, svgY: seat.cy })
-              }
-              onMouseLeave={() => setTooltip(null)}
-            />
-          );
-        })}
+        {allSeats.map(seat => (
+          <SeatCircle
+            key={seat.id}
+            seat={seat}
+            isTaken={takenIds.has(seat.id)}
+            isSelected={selectedIds.has(seat.id)}
+            fill={getSeatFill(seat)}
+            onClick={handleClick}
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+          />
+        ))}
 
         {/* ── Inline tooltip (SVG foreignObject) ───────────── */}
         {tooltip && !takenIds.has(tooltip.seat.id) && (() => {
