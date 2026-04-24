@@ -1,6 +1,12 @@
 ﻿import { useParams, useNavigate } from 'react-router-dom';
+import { useMemo } from 'react';
 import { ArrowRight, ShoppingCart, Info } from 'lucide-react';
+import { useQuery } from 'convex/react';
 import { events } from '../data/events';
+import { api } from '../../convex/_generated/api';
+import type { Id } from '../../convex/_generated/dataModel';
+import { convexEventToBuyerEvent } from '../lib/buyerEvent';
+import { mapTicketTypesToTierPrices } from '../lib/tierPricesFromTickets';
 import SeatingMap from '../components/SeatingMap';
 import { useCart } from '../context/CartContext';
 
@@ -8,7 +14,44 @@ export default function SeatingPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { count, total, items } = useCart();
-  const event = events.find(e => e.id === id);
+  const isLegacyDemoId = Boolean(id && /^e\d+$/.test(id));
+  const staticEvent = id && isLegacyDemoId ? events.find((e) => e.id === id) : undefined;
+  const convexEvent = useQuery(
+    api.events.get,
+    id && !isLegacyDemoId ? { id: id as Id<'events'> } : 'skip',
+  );
+  const event = staticEvent ?? (convexEvent ? convexEventToBuyerEvent(convexEvent) : undefined);
+  const loadingEvent = Boolean(id && !isLegacyDemoId && convexEvent === undefined);
+
+  const eventIdForTickets = !isLegacyDemoId && id ? (id as Id<'events'>) : undefined;
+  const ticketTypes = useQuery(
+    api.tickets.listByEvent,
+    eventIdForTickets ? { eventId: eventIdForTickets } : 'skip',
+  );
+  const { tierPrices, pricesLoading } = useMemo(() => {
+    if (isLegacyDemoId) return { tierPrices: null, pricesLoading: false };
+    if (ticketTypes === undefined) return { tierPrices: null, pricesLoading: true };
+    return {
+      tierPrices: mapTicketTypesToTierPrices(ticketTypes),
+      pricesLoading: false,
+    };
+  }, [isLegacyDemoId, ticketTypes]);
+
+  if (loadingEvent) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#ede9fe' }}>
+        <p className="text-sm font-medium" style={{ color: '#6b5a8a' }}>טוען אירוע…</p>
+      </div>
+    );
+  }
+
+  if (pricesLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#ede9fe' }}>
+        <p className="text-sm font-medium" style={{ color: '#6b5a8a' }}>טוען מחירי כרטיסים…</p>
+      </div>
+    );
+  }
 
   if (!event) {
     return (
@@ -60,7 +103,11 @@ export default function SeatingPage() {
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
           {/* Seating map */}
           <div className="bg-white rounded-2xl p-4" style={{ border: '1px solid #ddd6fe' }}>
-            <SeatingMap event={event} />
+            <SeatingMap
+              event={event}
+              tierPrices={tierPrices}
+              useDemoPriceTable={isLegacyDemoId}
+            />
           </div>
 
           {/* Summary sidebar */}

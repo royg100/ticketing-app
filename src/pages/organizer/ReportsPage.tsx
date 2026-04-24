@@ -1,8 +1,10 @@
 ﻿import { BarChart2, Download, TrendingUp, DollarSign, Ticket } from 'lucide-react';
-import { mockEvents } from '../../data/organizer';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import type { Doc } from '../../../convex/_generated/dataModel';
 
 function BarChartViz({ data }: { data: { label: string; val: number }[] }) {
-  const max = Math.max(...data.map(d => d.val));
+  const max = Math.max(...data.map(d => d.val), 1);
   return (
     <div className="flex items-end gap-2 h-32">
       {data.map(({ label, val }) => (
@@ -19,20 +21,22 @@ function BarChartViz({ data }: { data: { label: string; val: number }[] }) {
 }
 
 export default function ReportsPage() {
-  const totalRevenue = mockEvents.reduce((s, e) => s + e.revenue, 0);
-  const totalSold = mockEvents.reduce((s, e) => s + e.soldTickets, 0);
+  const events: Doc<'events'>[] = useQuery(api.events.list) ?? [];
+
+  const totalRevenue = events.reduce((s, e) => s + e.revenue, 0);
+  const totalSold = events.reduce((s, e) => s + e.soldTickets, 0);
   const platformFee = Math.round(totalRevenue * 0.05);
 
   const monthlyData = [
     { label: 'ינו', val: 0 },
     { label: 'פבר', val: 0 },
     { label: 'מרץ', val: 0 },
-    { label: 'אפר', val: 12000 },
-    { label: 'מאי', val: 45000 },
-    { label: 'יונ', val: 887400 },
-    { label: 'יול', val: 89200 },
-    { label: 'אוג', val: 0 },
-  ].filter(d => d.val > 0 || true);
+    { label: 'אפר', val: Math.round(totalRevenue * 0.02) },
+    { label: 'מאי', val: Math.round(totalRevenue * 0.08) },
+    { label: 'יונ', val: Math.round(totalRevenue * 0.7) },
+    { label: 'יול', val: Math.round(totalRevenue * 0.15) },
+    { label: 'אוג', val: Math.round(totalRevenue * 0.05) },
+  ];
 
   return (
     <div style={{ direction: 'rtl' }}>
@@ -70,7 +74,7 @@ export default function ReportsPage() {
           <TrendingUp size={16} style={{ color: '#7c3aed' }} />
           <h2 className="font-black" style={{ color: '#1a1a2e' }}>הכנסות חודשיות</h2>
         </div>
-        <BarChartViz data={monthlyData.map(d => ({ label: d.label, val: d.val || 1 }))} />
+        <BarChartViz data={monthlyData.map(d => ({ label: d.label, val: Math.max(d.val, 1) }))} />
       </div>
 
       {/* Per event */}
@@ -89,12 +93,16 @@ export default function ReportsPage() {
               </tr>
             </thead>
             <tbody>
-              {mockEvents.map(ev => {
+              {events.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-12 text-center text-sm" style={{ color: '#9b8fb0' }}>אין עדיין אירועים</td>
+                </tr>
+              ) : events.map(ev => {
                 const fee = Math.round(ev.revenue * 0.05);
                 const net = ev.revenue - fee;
-                const pct = Math.round((ev.soldTickets / ev.totalTickets) * 100);
+                const pct = ev.totalTickets > 0 ? Math.round((ev.soldTickets / ev.totalTickets) * 100) : 0;
                 return (
-                  <tr key={ev.id} style={{ borderBottom: '1px solid #faf8ff' }}>
+                  <tr key={ev._id} style={{ borderBottom: '1px solid #faf8ff' }}>
                     <td className="px-4 py-3">
                       <p className="font-bold" style={{ color: '#1a1a2e' }}>{ev.name}</p>
                       <p className="text-xs" style={{ color: '#9b8fb0' }}>{ev.date}</p>

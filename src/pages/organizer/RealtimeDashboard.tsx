@@ -1,10 +1,12 @@
 ﻿import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from 'convex/react';
 import {
   ArrowRight, Ticket, DollarSign, TrendingUp,
   Eye, RefreshCw, Activity, Target,
 } from 'lucide-react';
-import { mockEvents } from '../../data/organizer';
+import { api } from '../../../convex/_generated/api';
+import type { Doc, Id } from '../../../convex/_generated/dataModel';
 
 function useRealtime(base: number, variance: number) {
   const [val, setVal] = useState(base);
@@ -57,7 +59,9 @@ function MiniBar({ label, val, max, color }: { label: string; val: number; max: 
 export default function RealtimeDashboard() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const event = mockEvents.find(e => e.id === id);
+  const eventId = id as Id<'events'> | undefined;
+  const event = useQuery(api.events.get, eventId ? { id: eventId } : 'skip');
+  const tickets: Doc<'ticketTypes'>[] = useQuery(api.tickets.listByEvent, eventId ? { eventId } : 'skip') ?? [];
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
   const visitors = useRealtime(47, 8);
@@ -68,11 +72,12 @@ export default function RealtimeDashboard() {
     return () => clearInterval(t);
   }, []);
 
-  if (!event) return null;
+  if (event === undefined) return <div className="text-center py-20" style={{ color: '#9b8fb0' }}>טוען...</div>;
+  if (event === null) return <div className="text-center py-20" style={{ color: '#b91c1c' }}>האירוע לא נמצא</div>;
 
-  const soldPct = Math.round((event.soldTickets / event.totalTickets) * 100);
-  const convRate = ((event.soldTickets / (event.soldTickets + 890)) * 100).toFixed(1);
-  const avgTicketPrice = Math.round(event.revenue / event.soldTickets);
+  const soldPct = event.totalTickets > 0 ? Math.round((event.soldTickets / event.totalTickets) * 100) : 0;
+  const convRate = event.soldTickets > 0 ? ((event.soldTickets / (event.soldTickets + 890)) * 100).toFixed(1) : '0.0';
+  const avgTicketPrice = event.soldTickets > 0 ? Math.round(event.revenue / event.soldTickets) : 0;
 
   return (
     <div style={{ direction: 'rtl' }}>
@@ -139,22 +144,25 @@ export default function RealtimeDashboard() {
               <h2 className="font-black" style={{ color: '#1a1a2e' }}>פירוט לפי סוג כרטיס</h2>
             </div>
             <div className="space-y-3">
-              {[
-                { label: 'פלאטיניום VIP', sold: 57, total: 60, color: '#8b5cf6' },
-                { label: 'זהב – מרכז קדמי', sold: 130, total: 144, color: '#f59e0b' },
-                { label: 'כסף – כנפיים', sold: 210, total: 256, color: '#a78bfa' },
-                { label: 'ברונזה – אחורי', sold: 693, total: 840, color: '#34d399' },
-              ].map(({ label, sold, total, color }) => (
-                <div key={label}>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span style={{ color: '#6b5a8a' }}>{label}</span>
-                    <span className="font-bold" style={{ color }}>{sold}/{total}</span>
+              {tickets.length === 0 && (
+                <p className="text-xs text-center py-3" style={{ color: '#9b8fb0' }}>אין עדיין סוגי כרטיסים מוגדרים</p>
+              )}
+              {tickets.map((t, i) => {
+                const colors = ['#8b5cf6', '#f59e0b', '#a78bfa', '#34d399', '#7c3aed'];
+                const color = colors[i % colors.length];
+                const pct = t.quantity > 0 ? (t.sold / t.quantity) * 100 : 0;
+                return (
+                  <div key={t._id}>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span style={{ color: '#6b5a8a' }}>{t.name}</span>
+                      <span className="font-bold" style={{ color }}>{t.sold}/{t.quantity}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: '#f3f0ff' }}>
+                      <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, pct)}%`, background: color }} />
+                    </div>
                   </div>
-                  <div className="h-1.5 rounded-full overflow-hidden" style={{ background: '#f3f0ff' }}>
-                    <div className="h-full rounded-full transition-all" style={{ width: `${(sold / total) * 100}%`, background: color }} />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

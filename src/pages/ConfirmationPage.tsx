@@ -1,20 +1,20 @@
-﻿import { useNavigate } from 'react-router-dom';
+﻿import { useEffect } from 'react';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { CheckCircle, Download, Home, Calendar, MapPin, Ticket, BookOpen } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { mockLectures } from '../data/organizer';
 
-function hashCode(str: string): number {
-  let h = 0;
+function hashCode(str: string, seed = 0): number {
+  let h = seed;
   for (let i = 0; i < str.length; i++) {
     h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
   }
-  return Math.abs(h);
+  return h >>> 0;
 }
 
 function QRCode({ value, size = 120 }: { value: string; size?: number }) {
   const GRID = 21;
   const cellSize = size / GRID;
-  const hash = hashCode(value);
 
   const isFixed = (r: number, c: number) => {
     const finderPattern = (row: number, col: number) =>
@@ -41,8 +41,11 @@ function QRCode({ value, size = 120 }: { value: string; size?: number }) {
       if (isFixed(r, c)) {
         dark = true;
       } else if (!isFinder(r, c) && r !== 6 && c !== 6) {
-        const bit = (hash >> ((r * GRID + c) % 30)) & 1;
-        dark = bit === 1;
+        const cellIdx = r * GRID + c;
+        const wordIdx = Math.floor(cellIdx / 32);
+        const bitPos = cellIdx % 32;
+        const word = hashCode(value, wordIdx * 0x9e3779b9);
+        dark = ((word >> bitPos) & 1) === 1;
       }
       cells.push({ r, c, dark });
     }
@@ -73,9 +76,30 @@ function QRCode({ value, size = 120 }: { value: string; size?: number }) {
   );
 }
 
+type BitState = {
+  method?: 'bit';
+  transactionId?: string;
+  qrCode?: string;
+  grandTotal?: number;
+  payeePhone?: string;
+  payeeName?: string;
+};
+
 export default function ConfirmationPage() {
   const navigate = useNavigate();
-  const { selectedLectures } = useCart();
+  const { state } = useLocation();
+  const [searchParams] = useSearchParams();
+  const sessionId = searchParams.get('session_id');
+  const bitParam = searchParams.get('bit') === '1';
+  const s = (state ?? {}) as BitState;
+  const paidViaBit = bitParam && s.method === 'bit';
+  const paidViaStripe = Boolean(sessionId) && !paidViaBit;
+  const grandTotal: number = s.grandTotal ?? 0;
+  const { selectedLectures, clearCart } = useCart();
+
+  useEffect(() => {
+    if (sessionId || paidViaBit) clearCart();
+  }, [sessionId, paidViaBit, clearCart]);
   const orderNumber = `TK-${Math.floor(100000 + Math.random() * 900000)}`;
   const qrValue = `TICK:EV1:${orderNumber}`;
   const chosenLectures = selectedLectures
@@ -85,20 +109,48 @@ export default function ConfirmationPage() {
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12" style={{ background: '#ede9fe' }}>
       <div className="max-w-md w-full text-center space-y-6">
-        {/* Success icon */}
         <div className="flex justify-center">
           <div
             className="w-20 h-20 rounded-full flex items-center justify-center"
-            style={{ background: '#d4f7ee' }}
+            style={{ background: paidViaBit ? '#fff4e0' : '#d4f7ee' }}
           >
-            <CheckCircle size={44} style={{ color: '#00b894' }} />
+            <CheckCircle size={44} style={{ color: paidViaBit ? '#e67e22' : '#00b894' }} />
           </div>
         </div>
 
         <div>
-          <h1 className="text-3xl font-black" style={{ color: '#1a1a2e' }}>הרכישה הושלמה!</h1>
-          <p className="mt-2" style={{ color: '#6b5a8a' }}>הכרטיסים ישלחו לאימייל שלך תוך מספר דקות</p>
+          <h1 className="text-3xl font-black" style={{ color: '#1a1a2e' }}>
+            {paidViaBit ? 'ההזמנה נרשמה' : 'הרכישה הושלמה!'}
+          </h1>
+          {paidViaBit ? (
+            <p className="mt-2 text-sm leading-relaxed" style={{ color: '#6b5a8a' }}>
+              יש <strong>לשלם ב-Bit</strong> את הסכום למספר שמופיע בקופה, לפי הוראות שקיבלת. לאחר בדיקה ידנית נאשר את התשלום
+              (אין אימות אוטומטי).
+            </p>
+          ) : (
+            <p className="mt-2" style={{ color: '#6b5a8a' }}>הכרטיסים ישלחו לאימייל שלך תוך מספר דקות</p>
+          )}
         </div>
+
+        {paidViaBit && s.qrCode && s.transactionId && (
+          <div
+            className="text-right rounded-2xl p-4 text-sm space-y-3"
+            style={{ background: 'white', border: '1px solid #c8e6c9' }}
+          >
+            <p className="font-black" style={{ color: '#0d5c2a' }}>העבר/י ב-Bit ‏₪{Number(grandTotal).toLocaleString()}</p>
+            <p>
+              <span className="text-xs" style={{ color: '#6b5a8a' }}>אל: </span>
+              <strong dir="ltr">{s.payeeName || '—'}</strong> — <strong dir="ltr">{s.payeePhone || ''}</strong>
+            </p>
+            <p className="text-xs" style={{ color: '#4a3f66' }}>
+              <strong>קוד בביט/הפניה:</strong>{' '}
+              <code className="select-all font-mono text-xs px-1.5 py-0.5 rounded" style={{ background: '#f0f9ff' }}>{s.qrCode}</code>
+            </p>
+            <p className="text-xs" style={{ color: '#9b8fb0' }}>
+              מספר הזמנה (Convex): <code className="font-mono" dir="ltr">{s.transactionId}</code>
+            </p>
+          </div>
+        )}
 
         {/* Digital ticket */}
         <div className="bg-white rounded-2xl overflow-hidden text-right" style={{ border: '1px solid #ddd6fe' }}>
@@ -169,8 +221,14 @@ export default function ConfirmationPage() {
 
         {/* Order number summary */}
         <div className="bg-white rounded-2xl p-5 flex items-center justify-between" style={{ border: '1px solid #ddd6fe' }}>
-          <span className="text-sm" style={{ color: '#9b8fb0' }}>סה"כ שולם</span>
-          <span className="font-black text-xl" style={{ color: '#1a1a2e' }}>₪280</span>
+          <span className="text-sm" style={{ color: '#9b8fb0' }}>{paidViaBit ? 'סה"כ לתשלום (ביט)' : 'סה"כ שולם'}</span>
+          {paidViaStripe && grandTotal === 0 && !paidViaBit ? (
+            <span className="font-bold text-sm text-right" style={{ color: '#1a1a2e' }}>
+              חיוב הושלם (פירוט בדוא״ל)
+            </span>
+          ) : (
+            <span className="font-black text-xl" style={{ color: '#1a1a2e' }}>₪{grandTotal.toLocaleString()}</span>
+          )}
         </div>
 
         {/* Actions */}

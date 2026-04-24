@@ -19,12 +19,22 @@ export default function LoginPage() {
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ email: '', password: '', name: '' });
+  const [error, setError] = useState('');
 
   const set = (f: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [f]: e.target.value }));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+    if (form.password.length < 6) {
+      setError('הסיסמה חייבת להכיל לפחות 6 תווים');
+      return;
+    }
+    if (mode === 'register' && form.name.trim().length < 2) {
+      setError('נא להזין שם מלא');
+      return;
+    }
     setLoading(true);
     await new Promise(r => setTimeout(r, 1200));
     navigate('/organizer/lobby');
@@ -122,6 +132,12 @@ export default function LoginPage() {
                 <div className="text-left">
                   <button type="button" className="text-xs font-semibold" style={{ color: '#7c3aed' }}>שכחתי סיסמה</button>
                 </div>
+              )}
+
+              {error && (
+                <p className="text-xs font-semibold text-center px-3 py-2 rounded-xl" style={{ background: '#fee2e2', color: '#b91c1c' }}>
+                  {error}
+                </p>
               )}
 
               <button

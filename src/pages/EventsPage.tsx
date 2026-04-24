@@ -1,6 +1,12 @@
-﻿import { Calendar, Clock, MapPin, ChevronLeft, Music, Mic, Headphones, Music2, LayoutDashboard } from 'lucide-react';
+﻿import { useMemo } from 'react';
+import { Calendar, Clock, MapPin, ChevronLeft, Music, Mic, Headphones, Music2, LayoutDashboard } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
+import type { Id } from '../../convex/_generated/dataModel';
 import { events } from '../data/events';
+import { convexEventToBuyerEvent } from '../lib/buyerEvent';
+import { minEnabledTicketPrice } from '../lib/tierPricesFromTickets';
 import type { Event } from '../types';
 
 const GENRE_ICONS: Record<string, React.ReactNode> = {
@@ -23,9 +29,20 @@ const MIN_PRICES: Record<string, number> = {
 
 function EventCard({ event }: { event: Event }) {
   const navigate = useNavigate();
+  const isDemoId = /^e\d+$/.test(event.id);
+  const ticketTypes = useQuery(
+    api.tickets.listByEvent,
+    !isDemoId ? { eventId: event.id as Id<'events'> } : 'skip',
+  );
+  const fromPrice = useMemo(() => {
+    if (isDemoId) return MIN_PRICES[event.id] ?? 150;
+    if (ticketTypes === undefined) return null;
+    return minEnabledTicketPrice(ticketTypes) ?? 150;
+  }, [isDemoId, event.id, ticketTypes]);
+
   const availability = Math.round((event.availableSeats / event.totalSeats) * 100);
   const colors = GENRE_COLORS[event.genre] ?? { bg: '#f0f9ff', text: '#1a4a6e', icon: '#2980b9' };
-  const icon = GENRE_ICONS[event.genre];
+  const icon = GENRE_ICONS[event.genre] ?? <Music size={20} />;
   const isLowStock = availability < 30;
 
   return (
@@ -104,7 +121,9 @@ function EventCard({ event }: { event: Event }) {
           <div className="flex flex-col items-end gap-3 shrink-0">
             <div className="text-right">
               <p className="text-xs" style={{ color: '#9b8fb0' }}>החל מ</p>
-              <p className="text-2xl font-black" style={{ color: '#1a1a2e' }}>₪{MIN_PRICES[event.id] ?? 150}</p>
+              <p className="text-2xl font-black" style={{ color: '#1a1a2e' }}>
+                {fromPrice === null ? '₪…' : `₪${fromPrice}`}
+              </p>
             </div>
             <button
               className="flex items-center gap-1.5 px-4 py-2.5 rounded-full font-bold text-sm transition-all hover:scale-105"
@@ -121,36 +140,92 @@ function EventCard({ event }: { event: Event }) {
 }
 
 export default function EventsPage() {
-  const june15Events = events.filter(e => e.date.includes('15'));
-  const june16Events = events.filter(e => e.date.includes('16'));
+  const activeFromDb = useQuery(api.events.listByStatus, { status: 'active' });
+
+  const { displayEvents, fromDb, stats, hero } = useMemo(() => {
+    if (activeFromDb === undefined) {
+      return {
+        displayEvents: [] as Event[],
+        fromDb: false,
+        stats: [] as { val: string; label: string }[],
+        hero: null as { badge: string; title: string; subtitle: string } | null,
+      };
+    }
+    if (activeFromDb.length > 0) {
+      const display = [...activeFromDb]
+        .sort((a, b) => b._creationTime - a._creationTime)
+        .map(convexEventToBuyerEvent);
+      const days = new Set(display.map((e) => e.date)).size;
+      const seats = display.reduce((s, e) => s + e.totalSeats, 0);
+      return {
+        displayEvents: display,
+        fromDb: true,
+        stats: [
+          { val: String(display.length), label: 'אירועים' },
+          { val: String(days), label: 'תאריכים' },
+          { val: seats.toLocaleString('he-IL'), label: 'מקומות' },
+        ],
+        hero: {
+          badge: 'טיקסיט · מכירת כרטיסים',
+          title: 'אירועים פעילים',
+          subtitle: 'בחרו אירוע והמשיכו לרכישה',
+        },
+      };
+    }
+    return {
+      displayEvents: events,
+      fromDb: false,
+      stats: [
+        { val: events.length.toString(), label: 'הופעות' },
+        { val: '2', label: 'ימים' },
+        { val: '3,500', label: 'מקומות' },
+      ],
+      hero: {
+        badge: 'ירושלים · יוני 2025',
+        title: 'פסטיבל בריכת הסולטן',
+        subtitle: '4 הופעות מיוחדות · 2 ימים של מוזיקה · ירושלים',
+      },
+    };
+  }, [activeFromDb]);
+
+  const dateSections = useMemo(() => {
+    const map = new Map<string, Event[]>();
+    for (const ev of displayEvents) {
+      if (!map.has(ev.date)) map.set(ev.date, []);
+      map.get(ev.date)!.push(ev);
+    }
+    return Array.from(map.entries());
+  }, [displayEvents]);
+
+  if (activeFromDb === undefined || !hero) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#ede9fe' }}>
+        <p className="text-sm font-medium" style={{ color: '#6b5a8a' }}>טוען אירועים…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen">
       {/* Hero */}
       <div className="relative overflow-hidden" style={{ background: '#ffffff', borderBottom: '1px solid #ddd6fe' }}>
-        {/* Decorative circles */}
         <div className="absolute top-0 left-0 w-64 h-64 rounded-full opacity-30 -translate-x-1/3 -translate-y-1/3" style={{ background: '#ede9fe' }} />
         <div className="absolute bottom-0 right-0 w-48 h-48 rounded-full opacity-20 translate-x-1/4 translate-y-1/4" style={{ background: '#c4b5fd' }} />
 
         <div className="relative max-w-4xl mx-auto px-4 py-14 text-center">
-          {/* Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold mb-4" style={{ background: '#ede9fe', color: '#7c3aed' }}>
-            ירושלים · יוני 2025
+            {hero.badge}
           </div>
 
           <h1 className="text-4xl font-black leading-tight" style={{ color: '#1a1a2e' }}>
-            פסטיבל בריכת הסולטן
+            {hero.title}
           </h1>
           <p className="mt-3 text-lg" style={{ color: '#6b5a8a' }}>
-            4 הופעות מיוחדות · 2 ימים של מוזיקה · ירושלים
+            {hero.subtitle}
           </p>
 
           <div className="mt-8 flex justify-center gap-6 flex-wrap">
-            {[
-              { val: events.length.toString(), label: 'הופעות' },
-              { val: '2', label: 'ימים' },
-              { val: '3,500', label: 'מקומות' },
-            ].map(({ val, label }) => (
+            {stats.map(({ val, label }) => (
               <div
                 key={label}
                 className="flex flex-col items-center px-6 py-4 rounded-2xl"
@@ -166,33 +241,21 @@ export default function EventsPage() {
 
       {/* Events list */}
       <div className="max-w-4xl mx-auto px-4 py-10 space-y-10">
-        {june15Events.length > 0 && (
-          <section>
+        {dateSections.map(([date, evs]) => (
+          <section key={date}>
             <div className="flex items-center gap-3 mb-5">
               <div className="flex items-center justify-center w-8 h-8 rounded-xl" style={{ background: '#ffd433' }}>
                 <Calendar size={16} style={{ color: '#1a1a2e' }} />
               </div>
-              <h2 className="text-xl font-black" style={{ color: '#1a1a2e' }}>יום שישי · 15 ביוני</h2>
+              <h2 className="text-xl font-black" style={{ color: '#1a1a2e' }}>
+                {fromDb ? date : date.includes('15') ? 'יום שישי · 15 ביוני' : 'יום שבת · 16 ביוני'}
+              </h2>
             </div>
             <div className="space-y-4">
-              {june15Events.map(ev => <EventCard key={ev.id} event={ev} />)}
+              {evs.map((ev) => <EventCard key={ev.id} event={ev} />)}
             </div>
           </section>
-        )}
-
-        {june16Events.length > 0 && (
-          <section>
-            <div className="flex items-center gap-3 mb-5">
-              <div className="flex items-center justify-center w-8 h-8 rounded-xl" style={{ background: '#ffd433' }}>
-                <Calendar size={16} style={{ color: '#1a1a2e' }} />
-              </div>
-              <h2 className="text-xl font-black" style={{ color: '#1a1a2e' }}>יום שבת · 16 ביוני</h2>
-            </div>
-            <div className="space-y-4">
-              {june16Events.map(ev => <EventCard key={ev.id} event={ev} />)}
-            </div>
-          </section>
-        )}
+        ))}
       </div>
 
       {/* Footer */}

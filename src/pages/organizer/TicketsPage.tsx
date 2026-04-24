@@ -1,10 +1,15 @@
 ﻿import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery, useMutation } from 'convex/react';
 import {
   Plus, Ticket, Tag, ToggleLeft, ToggleRight, Trash2,
   Edit3, ArrowRight, Percent, DollarSign, Calendar, X, Save,
 } from 'lucide-react';
-import { mockTickets, mockCoupons, mockEvents, type TicketType, type Coupon } from '../../data/organizer';
+import { api } from '../../../convex/_generated/api';
+import type { Doc, Id } from '../../../convex/_generated/dataModel';
+
+type TicketType = Doc<'ticketTypes'>;
+type Coupon = Doc<'coupons'>;
 
 const inputBase: React.CSSProperties = {
   width: '100%',
@@ -17,8 +22,12 @@ const inputBase: React.CSSProperties = {
   fontSize: '14px',
 };
 
-function TicketCard({ ticket, onToggle }: { ticket: TicketType; onToggle: (id: string) => void }) {
-  const soldPct = Math.round((ticket.sold / ticket.quantity) * 100);
+function TicketCard({ ticket, onToggle, onDelete }: {
+  ticket: TicketType;
+  onToggle: (id: Id<'ticketTypes'>, enabled: boolean) => void;
+  onDelete: (id: Id<'ticketTypes'>) => void;
+}) {
+  const soldPct = ticket.quantity > 0 ? Math.round((ticket.sold / ticket.quantity) * 100) : 0;
   const remaining = ticket.quantity - ticket.sold;
   return (
     <div className="bg-white rounded-2xl p-5" style={{ border: `1px solid ${ticket.enabled ? '#ddd6fe' : '#f1f5f9'}`, opacity: ticket.enabled ? 1 : 0.65 }}>
@@ -62,12 +71,12 @@ function TicketCard({ ticket, onToggle }: { ticket: TicketType; onToggle: (id: s
         </div>
 
         <div className="flex flex-col items-end gap-2 shrink-0">
-          <button onClick={() => onToggle(ticket.id)} style={{ color: ticket.enabled ? '#7c3aed' : '#9b8fb0' }}>
+          <button onClick={() => onToggle(ticket._id, !ticket.enabled)} style={{ color: ticket.enabled ? '#7c3aed' : '#9b8fb0' }}>
             {ticket.enabled ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
           </button>
           <div className="flex gap-1.5">
             <button className="p-1.5 rounded-lg hover:bg-slate-100" style={{ color: '#9b8fb0' }}><Edit3 size={14} /></button>
-            <button className="p-1.5 rounded-lg hover:bg-red-50" style={{ color: '#e94560' }}><Trash2 size={14} /></button>
+            <button onClick={() => onDelete(ticket._id)} className="p-1.5 rounded-lg hover:bg-red-50" style={{ color: '#e94560' }}><Trash2 size={14} /></button>
           </div>
         </div>
       </div>
@@ -75,8 +84,12 @@ function TicketCard({ ticket, onToggle }: { ticket: TicketType; onToggle: (id: s
   );
 }
 
-function CouponRow({ coupon, onToggle }: { coupon: Coupon; onToggle: (id: string) => void }) {
-  const usedPct = Math.round((coupon.usedCount / coupon.usageLimit) * 100);
+function CouponRow({ coupon, onToggle, onDelete }: {
+  coupon: Coupon;
+  onToggle: (id: Id<'coupons'>, enabled: boolean) => void;
+  onDelete: (id: Id<'coupons'>) => void;
+}) {
+  const usedPct = coupon.usageLimit > 0 ? Math.round((coupon.usedCount / coupon.usageLimit) * 100) : 0;
   return (
     <div className="flex items-center gap-4 px-5 py-4" style={{ borderBottom: '1px solid #f3f0ff' }}>
       <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: coupon.type === 'percent' ? '#f0f9ff' : '#fff7ed', color: coupon.type === 'percent' ? '#0369a1' : '#c2410c' }}>
@@ -97,9 +110,12 @@ function CouponRow({ coupon, onToggle }: { coupon: Coupon; onToggle: (id: string
           <div className="h-full rounded-full" style={{ width: `${usedPct}%`, background: usedPct > 80 ? '#e94560' : '#7c3aed' }} />
         </div>
       </div>
-      <button onClick={() => onToggle(coupon.id)} style={{ color: coupon.enabled ? '#7c3aed' : '#9b8fb0' }}>
-        {coupon.enabled ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
-      </button>
+      <div className="flex items-center gap-1">
+        <button onClick={() => onToggle(coupon._id, !coupon.enabled)} style={{ color: coupon.enabled ? '#7c3aed' : '#9b8fb0' }}>
+          {coupon.enabled ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
+        </button>
+        <button onClick={() => onDelete(coupon._id)} className="p-1.5 rounded-lg hover:bg-red-50" style={{ color: '#e94560' }}><Trash2 size={14} /></button>
+      </div>
     </div>
   );
 }
@@ -110,36 +126,55 @@ interface NewCouponForm { code: string; type: 'percent' | 'fixed'; value: string
 export default function TicketsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const event = mockEvents.find(e => e.id === id);
+  const eventId = id as Id<'events'> | undefined;
+  const event = useQuery(api.events.get, eventId ? { id: eventId } : 'skip');
+  const tickets: TicketType[] = useQuery(api.tickets.listByEvent, eventId ? { eventId } : 'skip') ?? [];
+  const coupons: Coupon[] = useQuery(api.coupons.listByEvent, eventId ? { eventId } : 'skip') ?? [];
 
-  const [tickets, setTickets] = useState(mockTickets.filter(t => t.eventId === id));
-  const [coupons, setCoupons] = useState(mockCoupons.filter(c => c.eventId === id));
+  const createTicket = useMutation(api.tickets.create);
+  const updateTicket = useMutation(api.tickets.update);
+  const removeTicket = useMutation(api.tickets.remove);
+  const createCoupon = useMutation(api.coupons.create);
+  const updateCoupon = useMutation(api.coupons.update);
+  const removeCoupon = useMutation(api.coupons.remove);
+
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [showCouponModal, setShowCouponModal] = useState(false);
   const [ticketForm, setTicketForm] = useState<NewTicketForm>({ name: '', price: '', quantity: '', description: '', min: '1', max: '6' });
   const [couponForm, setCouponForm] = useState<NewCouponForm>({ code: '', type: 'percent', value: '', limit: '100', expires: '' });
 
-  const toggleTicket = (tid: string) => setTickets(ts => ts.map(t => t.id === tid ? { ...t, enabled: !t.enabled } : t));
-  const toggleCoupon = (cid: string) => setCoupons(cs => cs.map(c => c.id === cid ? { ...c, enabled: !c.enabled } : c));
+  const toggleTicket = (tid: Id<'ticketTypes'>, enabled: boolean) => { updateTicket({ id: tid, enabled }); };
+  const toggleCoupon = (cid: Id<'coupons'>, enabled: boolean) => { updateCoupon({ id: cid, enabled }); };
+  const deleteTicket = (tid: Id<'ticketTypes'>) => { if (confirm('למחוק את סוג הכרטיס?')) removeTicket({ id: tid }); };
+  const deleteCoupon = (cid: Id<'coupons'>) => { if (confirm('למחוק את הקופון?')) removeCoupon({ id: cid }); };
 
-  const addTicket = () => {
-    const t: TicketType = {
-      id: `t${Date.now()}`, eventId: id!, name: ticketForm.name, price: +ticketForm.price,
-      quantity: +ticketForm.quantity, sold: 0, description: ticketForm.description,
-      enabled: true, minPerOrder: +ticketForm.min, maxPerOrder: +ticketForm.max,
-    };
-    setTickets(ts => [...ts, t]);
+  const addTicket = async () => {
+    if (!eventId) return;
+    await createTicket({
+      eventId,
+      name: ticketForm.name,
+      price: +ticketForm.price,
+      quantity: +ticketForm.quantity,
+      description: ticketForm.description || undefined,
+      enabled: true,
+      minPerOrder: +ticketForm.min,
+      maxPerOrder: +ticketForm.max,
+    });
     setShowTicketModal(false);
     setTicketForm({ name: '', price: '', quantity: '', description: '', min: '1', max: '6' });
   };
 
-  const addCoupon = () => {
-    const c: Coupon = {
-      id: `c${Date.now()}`, eventId: id!, code: couponForm.code.toUpperCase(),
-      type: couponForm.type, value: +couponForm.value, usageLimit: +couponForm.limit,
-      usedCount: 0, expiresAt: couponForm.expires || undefined, enabled: true,
-    };
-    setCoupons(cs => [...cs, c]);
+  const addCoupon = async () => {
+    if (!eventId) return;
+    await createCoupon({
+      eventId,
+      code: couponForm.code.toUpperCase(),
+      type: couponForm.type,
+      value: +couponForm.value,
+      usageLimit: +couponForm.limit,
+      expiresAt: couponForm.expires || undefined,
+      enabled: true,
+    });
     setShowCouponModal(false);
     setCouponForm({ code: '', type: 'percent', value: '', limit: '100', expires: '' });
   };
@@ -174,7 +209,7 @@ export default function TicketsPage() {
             </button>
           </div>
           <div className="space-y-3">
-            {tickets.map(t => <TicketCard key={t.id} ticket={t} onToggle={toggleTicket} />)}
+            {tickets.map(t => <TicketCard key={t._id} ticket={t} onToggle={toggleTicket} onDelete={deleteTicket} />)}
             {tickets.length === 0 && (
               <div className="bg-white rounded-2xl p-8 text-center" style={{ border: '1px solid #ddd6fe' }}>
                 <Ticket size={32} className="mx-auto mb-3" style={{ color: '#ddd6fe' }} />
@@ -207,7 +242,7 @@ export default function TicketsPage() {
                 <p className="text-sm" style={{ color: '#9b8fb0' }}>אין קופונים עדיין</p>
               </div>
             ) : (
-              coupons.map(c => <CouponRow key={c.id} coupon={c} onToggle={toggleCoupon} />)
+              coupons.map(c => <CouponRow key={c._id} coupon={c} onToggle={toggleCoupon} onDelete={deleteCoupon} />)
             )}
           </div>
         </div>

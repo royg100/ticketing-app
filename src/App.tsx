@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { CartProvider } from './context/CartContext';
 import Navbar from './components/Navbar';
 import CartDrawer from './components/CartDrawer';
+import BuyerNavPanel from './components/buyer/BuyerNavPanel';
+import BuyerNavDrawer from './components/buyer/BuyerNavDrawer';
 import EventsPage from './pages/EventsPage';
 import SeatingPage from './pages/SeatingPage';
 import CheckoutPage from './pages/CheckoutPage';
@@ -26,16 +28,42 @@ import SettingsPage from './pages/organizer/SettingsPage';
 
 function BuyerLayout() {
   const [cartOpen, setCartOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   return (
-    <div className="min-h-screen" style={{ background: '#ede9fe' }}>
-      <Navbar onCartOpen={() => setCartOpen(true)} />
-      <CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} />
-      <Routes>
-        <Route path="/" element={<EventsPage />} />
-        <Route path="/event/:id" element={<SeatingPage />} />
-        <Route path="/checkout" element={<CheckoutPage />} />
-        <Route path="/confirmation" element={<ConfirmationPage />} />
-      </Routes>
+    <div className="min-h-screen flex" dir="rtl" style={{ background: '#ede9fe' }}>
+      <aside
+        className="hidden md:flex w-64 shrink-0 flex-col sticky top-0 h-screen overflow-hidden bg-white"
+        style={{ borderInlineStart: '1px solid #ddd6fe' }}
+        aria-label="תפריט צד"
+      >
+        <div className="p-4 border-b" style={{ borderColor: '#ddd6fe' }}>
+          <p className="font-black text-sm" style={{ color: '#1a1a2e' }}>
+            טיקסיט
+          </p>
+          <p className="text-[11px] mt-0.5" style={{ color: '#9b8fb0' }}>
+            בחרו אירוע או חזרו לכל הרשימה
+          </p>
+        </div>
+        <div className="p-3 flex-1 min-h-0 flex flex-col overflow-y-auto">
+          <BuyerNavPanel />
+        </div>
+      </aside>
+
+      <BuyerNavDrawer open={navOpen} onClose={() => setNavOpen(false)} />
+
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+        <Navbar
+          onCartOpen={() => setCartOpen(true)}
+          onOpenSideNav={() => setNavOpen(true)}
+        />
+        <CartDrawer open={cartOpen} onClose={() => setCartOpen(false)} />
+        <Routes>
+          <Route path="/" element={<EventsPage />} />
+          <Route path="/event/:id" element={<SeatingPage />} />
+          <Route path="/checkout" element={<CheckoutPage />} />
+          <Route path="/confirmation" element={<ConfirmationPage />} />
+        </Routes>
+      </div>
     </div>
   );
 }

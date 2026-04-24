@@ -1,34 +1,50 @@
-﻿import { ShoppingCart, LayoutDashboard } from 'lucide-react';
+﻿import { Menu, ShoppingCart, LayoutDashboard } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { useNavigate } from 'react-router-dom';
 
+const VENUE_TAG =
+  (import.meta.env.VITE_PUBLIC_VENUE_TAGLINE as string | undefined)?.trim() || 'רכישת כרטיסים';
+
 interface NavbarProps {
   onCartOpen: () => void;
+  onOpenSideNav?: () => void;
 }
 
-export default function Navbar({ onCartOpen }: NavbarProps) {
+export default function Navbar({ onCartOpen, onOpenSideNav }: NavbarProps) {
   const { count } = useCart();
   const navigate = useNavigate();
 
   return (
     <nav className="bg-white sticky top-0 z-30" style={{ borderBottom: '1px solid #ddd6fe' }}>
-      <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-        {/* Logo */}
-        <button
-          onClick={() => navigate('/')}
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity"
-        >
-          <div
-            className="flex items-center justify-center w-9 h-9 rounded-xl font-black text-white text-sm"
-            style={{ background: '#7c3aed' }}
+      <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1 min-w-0">
+          {onOpenSideNav && (
+            <button
+              type="button"
+              onClick={onOpenSideNav}
+              className="md:hidden p-2 -mr-1 rounded-xl shrink-0 hover:opacity-90"
+              style={{ color: '#1a1a2e' }}
+              aria-label="תפריט אירועים"
+            >
+              <Menu size={22} />
+            </button>
+          )}
+          <button
+            onClick={() => navigate('/')}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity min-w-0"
           >
-            T
-          </div>
-          <div className="leading-none">
-            <span className="font-black text-lg" style={{ color: '#1a1a2e' }}>טיקסיט</span>
-            <span className="text-xs font-normal block" style={{ color: '#9b8fb0' }}>בריכת הסולטן</span>
-          </div>
-        </button>
+            <div
+              className="flex items-center justify-center w-9 h-9 rounded-xl font-black text-white text-sm"
+              style={{ background: '#7c3aed' }}
+            >
+              T
+            </div>
+            <div className="leading-none text-right min-w-0">
+              <span className="font-black text-lg" style={{ color: '#1a1a2e' }}>טיקסיט</span>
+              <span className="text-xs font-normal block truncate" style={{ color: '#9b8fb0' }}>{VENUE_TAG}</span>
+            </div>
+          </button>
+        </div>
 
         {/* Organizer link */}
         <button

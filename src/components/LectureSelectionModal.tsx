@@ -216,7 +216,7 @@ export default function LectureSelectionModal({ eventId = 'ev1', initialSelectio
           )}
           <div className="flex gap-3">
             <button
-              onClick={onClose}
+              onClick={() => { onConfirm(Object.entries(selections).map(([slotKey, lectureId]) => ({ slotKey, lectureId }))); onClose(); }}
               className="flex-1 py-3 rounded-full text-sm font-bold"
               style={{ border: '1.5px solid #ddd6fe', color: '#6b5a8a' }}
             >

@@ -1,7 +1,11 @@
 ﻿import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useMutation } from 'convex/react';
 import { Plus, Search, Filter, Calendar, MapPin, Ticket, MoreVertical, Copy, Pause, Archive, BarChart2, Eye } from 'lucide-react';
-import { mockEvents, type OrganizerEvent } from '../../data/organizer';
+import { api } from '../../../convex/_generated/api';
+import type { Doc, Id } from '../../../convex/_generated/dataModel';
+
+type OrganizerEvent = Doc<'events'>;
 
 const STATUS_MAP = {
   active: { label: 'פעיל', bg: '#dcfce7', color: '#15803d' },
@@ -12,9 +16,14 @@ const STATUS_MAP = {
 
 type Filter = 'all' | OrganizerEvent['status'];
 
-function EventRow({ event, onNavigate }: { event: OrganizerEvent; onNavigate: (id: string) => void }) {
+function EventRow({ event, onNavigate, onDuplicate, onStatusChange }: {
+  event: OrganizerEvent;
+  onNavigate: (id: string) => void;
+  onDuplicate: (id: Id<'events'>) => void;
+  onStatusChange: (id: Id<'events'>, status: OrganizerEvent['status']) => void;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const pct = Math.round((event.soldTickets / event.totalTickets) * 100);
+  const pct = event.totalTickets > 0 ? Math.round((event.soldTickets / event.totalTickets) * 100) : 0;
   const st = STATUS_MAP[event.status];
 
   return (
@@ -33,7 +42,7 @@ function EventRow({ event, onNavigate }: { event: OrganizerEvent; onNavigate: (i
                 <h3
                   className="font-black text-base cursor-pointer hover:underline"
                   style={{ color: '#1a1a2e' }}
-                  onClick={() => onNavigate(event.id)}
+                  onClick={() => onNavigate(event._id)}
                 >
                   {event.name}
                 </h3>
@@ -62,11 +71,11 @@ function EventRow({ event, onNavigate }: { event: OrganizerEvent; onNavigate: (i
                   style={{ background: '#fff', border: '1px solid #ddd6fe', boxShadow: '0 8px 24px rgba(0,0,0,0.08)' }}
                 >
                   {[
-                    { icon: BarChart2, label: 'דאשבורד', action: () => onNavigate(`${event.id}/dashboard`) },
+                    { icon: BarChart2, label: 'דאשבורד', action: () => onNavigate(`${event._id}/dashboard`) },
                     { icon: Eye, label: 'צפייה בדף מכירה', action: () => window.open('/', '_blank') },
-                    { icon: Copy, label: 'שכפל אירוע', action: () => setMenuOpen(false) },
-                    { icon: Pause, label: 'השהה', action: () => setMenuOpen(false) },
-                    { icon: Archive, label: 'ארכיון', action: () => setMenuOpen(false) },
+                    { icon: Copy, label: 'שכפל אירוע', action: () => onDuplicate(event._id) },
+                    { icon: Pause, label: event.status === 'paused' ? 'הפעל' : 'השהה', action: () => onStatusChange(event._id, event.status === 'paused' ? 'active' : 'paused') },
+                    { icon: Archive, label: 'ארכיון', action: () => onStatusChange(event._id, 'archived') },
                   ].map(({ icon: Icon, label, action }) => (
                     <button
                       key={label}
@@ -116,10 +125,10 @@ function EventRow({ event, onNavigate }: { event: OrganizerEvent; onNavigate: (i
           {/* Quick links */}
           <div className="mt-3 flex flex-wrap gap-2">
             {[
-              { label: 'עריכה', to: event.id },
-              { label: 'כרטיסים', to: `${event.id}/tickets` },
-              { label: 'עסקאות', to: `${event.id}/transactions` },
-              { label: 'קופה', to: `${event.id}/pos` },
+              { label: 'עריכה', to: event._id },
+              { label: 'כרטיסים', to: `${event._id}/tickets` },
+              { label: 'עסקאות', to: `${event._id}/transactions` },
+              { label: 'קופה', to: `${event._id}/pos` },
             ].map(({ label, to }) => (
               <button
                 key={label}
@@ -142,18 +151,44 @@ export default function EventsListPage() {
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
 
-  const filtered = mockEvents.filter(e => {
+  const eventsData = useQuery(api.events.list);
+  const isLoading = eventsData === undefined;
+  const events: OrganizerEvent[] = eventsData ?? [];
+  const createEvent = useMutation(api.events.create);
+  const updateEvent = useMutation(api.events.update);
+
+  const filtered = events.filter(e => {
     const matchFilter = filter === 'all' || e.status === filter;
     const matchSearch = !search || e.name.toLowerCase().includes(search.toLowerCase()) || e.venue.toLowerCase().includes(search.toLowerCase());
     return matchFilter && matchSearch;
   });
 
   const counts: Record<string, number> = {
-    all: mockEvents.length,
-    active: mockEvents.filter(e => e.status === 'active').length,
-    draft: mockEvents.filter(e => e.status === 'draft').length,
-    paused: mockEvents.filter(e => e.status === 'paused').length,
-    archived: mockEvents.filter(e => e.status === 'archived').length,
+    all: events.length,
+    active: events.filter(e => e.status === 'active').length,
+    draft: events.filter(e => e.status === 'draft').length,
+    paused: events.filter(e => e.status === 'paused').length,
+    archived: events.filter(e => e.status === 'archived').length,
+  };
+
+  const handleDuplicate = async (id: Id<'events'>) => {
+    const src = events.find(e => e._id === id);
+    if (!src) return;
+    const newId = await createEvent({
+      name: `${src.name} (עותק)`,
+      date: src.date,
+      time: src.time,
+      venue: src.venue,
+      category: src.category,
+      description: src.description,
+      status: 'draft',
+      totalTickets: src.totalTickets,
+    });
+    navigate(`/organizer/events/${newId}`);
+  };
+
+  const handleStatusChange = async (id: Id<'events'>, status: OrganizerEvent['status']) => {
+    await updateEvent({ id, status });
   };
 
   return (
@@ -161,7 +196,7 @@ export default function EventsListPage() {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-black" style={{ color: '#1a1a2e' }}>האירועים שלי</h1>
-          <p className="text-sm mt-1" style={{ color: '#9b8fb0' }}>{mockEvents.length} אירועים בסך הכול</p>
+          <p className="text-sm mt-1" style={{ color: '#9b8fb0' }}>{isLoading ? 'טוען...' : `${events.length} אירועים בסך הכול`}</p>
         </div>
         <button
           onClick={() => navigate('/organizer/events/new')}
@@ -202,7 +237,12 @@ export default function EventsListPage() {
 
       {/* List */}
       <div className="space-y-4">
-        {filtered.length === 0 ? (
+        {isLoading ? (
+          <div className="bg-white rounded-2xl p-12 text-center" style={{ border: '1px solid #ddd6fe' }}>
+            <div className="w-8 h-8 rounded-full border-4 border-purple-200 border-t-purple-600 animate-spin mx-auto mb-4" />
+            <p className="font-bold" style={{ color: '#6b5a8a' }}>טוען אירועים...</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="bg-white rounded-2xl p-12 text-center" style={{ border: '1px solid #ddd6fe' }}>
             <Calendar size={40} className="mx-auto mb-4" style={{ color: '#ddd6fe' }} />
             <p className="font-bold" style={{ color: '#6b5a8a' }}>לא נמצאו אירועים</p>
@@ -211,9 +251,11 @@ export default function EventsListPage() {
         ) : (
           filtered.map(ev => (
             <EventRow
-              key={ev.id}
+              key={ev._id}
               event={ev}
               onNavigate={(path) => navigate(`/organizer/events/${path}`)}
+              onDuplicate={handleDuplicate}
+              onStatusChange={handleStatusChange}
             />
           ))
         )}

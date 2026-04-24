@@ -7,13 +7,16 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "convex:stripe-apply": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/apply-stripe-to-convex.ps1"
   },
   "dependencies": {
+    "convex": "^1.36.1",
     "lucide-react": "^1.9.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "react-router-dom": "^7.14.2"
+    "react-router-dom": "^7.14.2",
+    "stripe": "^18.5.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,6 +1,8 @@
 ﻿import { useNavigate } from 'react-router-dom';
+import { useQuery } from 'convex/react';
 import { TrendingUp, Ticket, DollarSign, Users, Plus, ChevronLeft, Calendar, BarChart2, ArrowUpRight } from 'lucide-react';
-import { mockEvents } from '../../data/organizer';
+import { api } from '../../../convex/_generated/api';
+import type { Doc } from '../../../convex/_generated/dataModel';
 
 const STATUS_MAP = {
   active: { label: 'פעיל', bg: '#dcfce7', color: '#15803d' },
@@ -27,12 +29,13 @@ function StatCard({ icon: Icon, label, value, sub, color }: { icon: React.Elemen
 
 export default function LobbyPage() {
   const navigate = useNavigate();
+  const events: Doc<'events'>[] = useQuery(api.events.list) ?? [];
 
-  const totalRevenue = mockEvents.reduce((s, e) => s + e.revenue, 0);
-  const totalSold = mockEvents.reduce((s, e) => s + e.soldTickets, 0);
-  const activeEvents = mockEvents.filter(e => e.status === 'active').length;
+  const totalRevenue = events.reduce((s, e) => s + e.revenue, 0);
+  const totalSold = events.reduce((s, e) => s + e.soldTickets, 0);
+  const activeEvents = events.filter(e => e.status === 'active').length;
 
-  const recentEvents = [...mockEvents].sort((a, b) => b.soldTickets - a.soldTickets).slice(0, 4);
+  const recentEvents = [...events].sort((a, b) => b.soldTickets - a.soldTickets).slice(0, 4);
 
   return (
     <div style={{ direction: 'rtl' }}>
@@ -55,8 +58,8 @@ export default function LobbyPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <StatCard icon={DollarSign} label="הכנסה כוללת" value={`₪${(totalRevenue / 1000).toFixed(0)}K`} sub="↑ 12% מהחודש שעבר" color="#7c3aed" />
-        <StatCard icon={Ticket} label="כרטיסים נמכרו" value={totalSold.toLocaleString()} sub="סה&quot;כ כל האירועים" color="#8b5cf6" />
-        <StatCard icon={Calendar} label="אירועים פעילים" value={activeEvents.toString()} sub={`מתוך ${mockEvents.length} אירועים`} color="#f59e0b" />
+        <StatCard icon={Ticket} label="כרטיסים נמכרו" value={totalSold.toLocaleString()} sub='סה"כ כל האירועים' color="#8b5cf6" />
+        <StatCard icon={Calendar} label="אירועים פעילים" value={activeEvents.toString()} sub={`מתוך ${events.length} אירועים`} color="#f59e0b" />
         <StatCard icon={Users} label="קונים ייחודיים" value="1,240" sub="↑ 8% מהחודש שעבר" color="#10b981" />
       </div>
 
@@ -74,14 +77,20 @@ export default function LobbyPage() {
             </button>
           </div>
           <div className="divide-y" style={{ borderColor: '#ddd6fe' }}>
+            {recentEvents.length === 0 && (
+              <div className="px-5 py-12 text-center">
+                <Calendar size={32} className="mx-auto mb-3" style={{ color: '#ddd6fe' }} />
+                <p className="text-sm" style={{ color: '#9b8fb0' }}>אין עדיין אירועים. צור אירוע חדש כדי להתחיל.</p>
+              </div>
+            )}
             {recentEvents.map(ev => {
-              const pct = Math.round((ev.soldTickets / ev.totalTickets) * 100);
+              const pct = ev.totalTickets > 0 ? Math.round((ev.soldTickets / ev.totalTickets) * 100) : 0;
               const st = STATUS_MAP[ev.status];
               return (
                 <div
-                  key={ev.id}
+                  key={ev._id}
                   className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-slate-50 transition-colors"
-                  onClick={() => navigate(`/organizer/events/${ev.id}`)}
+                  onClick={() => navigate(`/organizer/events/${ev._id}`)}
                 >
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-white shrink-0 text-sm" style={{ background: '#7c3aed' }}>
                     {ev.name[0]}
@@ -120,7 +129,7 @@ export default function LobbyPage() {
             <div className="space-y-2">
               {[
                 { icon: Plus, label: 'צור אירוע חדש', to: '/organizer/events/new', yellow: true },
-                { icon: Ticket, label: 'הנפק כרטיסים', to: '/organizer/events/ev1/tickets', yellow: false },
+                { icon: Ticket, label: 'נהל אירועים', to: '/organizer/events', yellow: false },
                 { icon: Users, label: 'ייצוא רשימת קונים', to: '/organizer/transactions', yellow: false },
                 { icon: BarChart2, label: 'דוח מכירות', to: '/organizer/reports', yellow: false },
               ].map(({ icon: Icon, label, to, yellow }) => (

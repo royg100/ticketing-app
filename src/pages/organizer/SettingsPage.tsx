@@ -117,8 +117,10 @@ export default function SettingsPage() {
             </div>
           </div>
           <div className="mt-4 rounded-xl px-4 py-3" style={{ background: '#fff7ed', border: '1px solid #fed7aa' }}>
-            <p className="text-xs font-bold" style={{ color: '#92400e' }}>🔐 ספק סליקה</p>
-            <p className="text-xs mt-0.5" style={{ color: '#b45309' }}>Cardcom מחובר · לשינוי הספק צור קשר עם התמיכה</p>
+            <p className="text-xs font-bold" style={{ color: '#92400e' }}>🔐 סליקה (Stripe)</p>
+            <p className="text-xs mt-0.5" style={{ color: '#b45309' }}>
+              התשלום בדף הקנייה מועבר ל-Stripe. מפתח סודי ו-URL ו-webhook מוגדרים ב-Convex (Environment), לא כאן.
+            </p>
           </div>
         </SectionCard>
 

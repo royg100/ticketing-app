@@ -4,6 +4,13 @@ import { useCart } from '../context/CartContext';
 
 interface SeatingMapProps {
   event: Event;
+  /** null/undefined: legacy demo (e1…) uses TIER_PRICES. */
+  tierPrices?: Record<SeatTier, number> | null;
+  /**
+   * true = אירועי דמו (e1) — מחירי 150/280… בקוד
+   * false = Convex — בלי `tierPrices` אין מפה, לא נופלים ל־150
+   */
+  useDemoPriceTable: boolean;
 }
 
 interface SeatDef {
@@ -67,7 +74,7 @@ function makeRng(seed: number) {
 
 const TAKEN_RATIO = 0.27;
 
-function generateSeats(): SeatDef[] {
+function generateSeats(tierPriceTable: Record<SeatTier, number>): SeatDef[] {
   const seats: SeatDef[] = [];
 
   const addBlock = (
@@ -93,7 +100,7 @@ function generateSeats(): SeatDef[] {
           sectionLabel: label,
           row: rowChar,
           number: c + 1,
-          price: TIER_PRICES[tier],
+          price: tierPriceTable[tier],
         });
       }
     }
@@ -138,8 +145,16 @@ function generateSeats(): SeatDef[] {
   return seats;
 }
 
-export default function SeatingMap({ event }: SeatingMapProps) {
-  const allSeats = useMemo(() => generateSeats(), []);
+export default function SeatingMap({ event, tierPrices, useDemoPriceTable }: SeatingMapProps) {
+  const priceTable = useMemo((): Record<SeatTier, number> | null => {
+    if (useDemoPriceTable) return tierPrices ?? TIER_PRICES;
+    return tierPrices ?? null;
+  }, [useDemoPriceTable, tierPrices]);
+
+  const allSeats = useMemo(
+    () => (priceTable ? generateSeats(priceTable) : []),
+    [priceTable],
+  );
 
   const [takenIds] = useState<Set<string>>(() => {
     const set = new Set<string>();
@@ -184,6 +199,26 @@ export default function SeatingMap({ event }: SeatingMapProps) {
 
   // Ground/GA area bounds (SVG units)
   const GROUND = { x: 220, y: 136, w: 304, h: 134 };
+
+  if (!useDemoPriceTable && !tierPrices) {
+    return (
+      <div
+        className="rounded-2xl p-8 text-center"
+        style={{ border: '1px solid #ddd6fe', background: '#faf8ff' }}
+        role="status"
+      >
+        <p className="font-bold" style={{ color: '#1a1a2e' }}>אין מחירים שמקושרים לאירוע</p>
+        <p className="text-sm mt-2 leading-relaxed" style={{ color: '#6b5a8a' }}>
+          הוסיפ/י לפחות סוג כרטיס אחד במסך "כרטיסים" בפאנל המארגנים, ורענן/י. אם כבר הוספת — בדקו
+          שאתה באירוע הנכון (הקישור מכתובת הדפדפן).
+        </p>
+      </div>
+    );
+  }
+
+  if (!priceTable) {
+    return null;
+  }
 
   return (
     <div className="relative select-none w-full">
@@ -322,12 +357,27 @@ export default function SeatingMap({ event }: SeatingMapProps) {
 
       {/* ── Legend ──────────────────────────────────────────── */}
       <div className="flex flex-wrap justify-center gap-x-5 gap-y-2 mt-3 text-xs">
-        {(Object.entries(TIER_HEX) as [SeatTier, string][]).map(([tier, hex]) => (
-          <div key={tier} className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ background: hex }} />
-            <span style={{ color: '#6b5a8a' }}>{TIER_LABEL[tier]} · ₪{TIER_PRICES[tier]}</span>
-          </div>
-        ))}
+        {(() => {
+          const unique = new Set((Object.values(priceTable) as number[]).map((n) => n));
+          if (unique.size === 1) {
+            const p = [...unique][0];
+            return (
+              <div className="flex items-center gap-1.5">
+                <span style={{ color: '#6b5a8a' }}>
+                  <strong style={{ color: '#1a1a2e' }}>₪{p}</strong> — מחיר לפי כרטיס באירוע
+                </span>
+              </div>
+            );
+          }
+          return (Object.entries(TIER_HEX) as [SeatTier, string][]).map(([tier, hex]) => (
+            <div key={tier} className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ background: hex }} />
+              <span style={{ color: '#6b5a8a' }}>
+                {TIER_LABEL[tier]} · ₪{priceTable[tier]}
+              </span>
+            </div>
+          ));
+        })()}
         <div className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ background: '#b8a9d0' }} />
           <span style={{ color: '#9b8fb0' }}>תפוס</span>

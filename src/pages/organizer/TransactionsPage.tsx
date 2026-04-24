@@ -1,11 +1,15 @@
 ﻿import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useQuery } from 'convex/react';
 import {
   ArrowRight, Search, Download, Filter,
   CheckCircle, XCircle, AlertCircle, RotateCcw, Mail,
   Phone, Ticket, ChevronDown, ChevronUp,
 } from 'lucide-react';
-import { mockTransactions, mockEvents, type Transaction } from '../../data/organizer';
+import { api } from '../../../convex/_generated/api';
+import type { Doc, Id } from '../../../convex/_generated/dataModel';
+
+type Transaction = Doc<'transactions'>;
 
 const RefundIcon2 = RotateCcw;
 
@@ -14,6 +18,7 @@ const STATUS_CONFIG = {
   failed: { label: 'כישלון', bg: '#fee2e2', color: '#b91c1c', icon: XCircle },
   cancelled: { label: 'בוטל', bg: '#fef9c3', color: '#a16207', icon: AlertCircle },
   refunded: { label: 'הוחזר', bg: '#f1f5f9', color: '#64748b', icon: RefundIcon2 },
+  pending_bit: { label: 'ממתין (Bit)', bg: '#eff6ff', color: '#1d4ed8', icon: AlertCircle },
 };
 
 const CHECKIN_CONFIG = {
@@ -106,7 +111,7 @@ function TransactionRow({ tx }: { tx: Transaction }) {
 function exportToCSV(txs: Transaction[], filename: string) {
   const headers = ['מספר עסקה', 'שם', 'אימייל', 'טלפון', 'כרטיסים', 'סכום', 'עמלה', 'סטטוס', 'כניסה', 'קופון', 'תאריך'];
   const rows = txs.map(tx => [
-    tx.id,
+    tx._id,
     tx.buyerName,
     tx.buyerEmail,
     tx.buyerPhone,
@@ -134,9 +139,11 @@ function exportToCSV(txs: Transaction[], filename: string) {
 export default function TransactionsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const event = mockEvents.find(e => e.id === id);
-
-  const allTxs = id ? mockTransactions.filter(t => t.eventId === id) : mockTransactions;
+  const eventId = id as Id<'events'> | undefined;
+  const event = useQuery(api.events.get, eventId ? { id: eventId } : 'skip');
+  const txsByEvent = useQuery(api.transactions.listByEvent, eventId ? { eventId } : 'skip');
+  const txsAll = useQuery(api.transactions.list, eventId ? 'skip' : {});
+  const allTxs: Transaction[] = (eventId ? txsByEvent : txsAll) ?? [];
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -237,7 +244,7 @@ export default function TransactionsPage() {
                   </td>
                 </tr>
               ) : (
-                filtered.map(tx => <TransactionRow key={tx.id} tx={tx} />)
+                filtered.map(tx => <TransactionRow key={tx._id} tx={tx} />)
               )}
             </tbody>
           </table>

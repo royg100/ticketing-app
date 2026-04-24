@@ -1,9 +1,12 @@
 ﻿import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowRight, CreditCard, Lock, User, Tag, CheckCircle, XCircle, BookOpen, ChevronLeft } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useAction, useQuery, useMutation } from 'convex/react';
+import { ArrowRight, CreditCard, Lock, User, Tag, CheckCircle, XCircle, BookOpen, ChevronLeft, Smartphone, HelpCircle } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { mockCoupons, mockLectures } from '../data/organizer';
 import LectureSelectionModal from '../components/LectureSelectionModal';
+import { api } from '../../convex/_generated/api';
+import type { Id } from '../../convex/_generated/dataModel';
 
 const SECTION_NAMES: Record<string, string> = {
   'vip-floor': 'VIP רצפה',
@@ -22,10 +25,6 @@ interface FormState {
   lastName: string;
   email: string;
   phone: string;
-  cardNumber: string;
-  cardExpiry: string;
-  cardCvv: string;
-  cardName: string;
 }
 
 const inputStyle = {
@@ -39,19 +38,32 @@ const inputStyle = {
   fontSize: '14px',
 };
 
+const BIT_PHONE = (import.meta.env.VITE_BIT_PHONE as string | undefined)?.trim() ?? '';
+const BIT_PAYEE_NAME = (import.meta.env.VITE_BIT_PAYEE_NAME as string | undefined)?.trim() || 'העסק';
+
+type PayMode = 'stripe' | 'bit';
+
+/** תואם ל־`STRIPE_MIN_GRAND_TOTAL_ILS` ב-convex/stripeCheckout.ts */
+const STRIPE_MIN_NIS = 2;
+
 export default function CheckoutPage() {
   const navigate = useNavigate();
-  const { items, total, clearCart } = useCart();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { items, total } = useCart();
   const [loading, setLoading] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
+  const [payMode, setPayMode] = useState<PayMode>('stripe');
+  const createCheckout = useAction(api.stripeCheckout.createCheckoutSession);
+  const createBitPending = useMutation(api.bitCheckout.createPending);
+  const firstActive = useQuery(api.events.getFirstActiveId);
+  const envEvent = import.meta.env.VITE_CHECKOUT_EVENT_ID as string | undefined;
+  const eventId: Id<'events'> | undefined =
+    (envEvent && envEvent.length > 0 ? (envEvent as Id<'events'>) : undefined) ?? firstActive?._id;
   const [form, setForm] = useState<FormState>({
     firstName: '',
     lastName: '',
     email: '',
     phone: '',
-    cardNumber: '',
-    cardExpiry: '',
-    cardCvv: '',
-    cardName: '',
   });
 
   const { selectedLectures, setSelectedLectures } = useCart();
@@ -92,24 +104,88 @@ export default function CheckoutPage() {
   };
 
   const handleChange = (field: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    let val = e.target.value;
-    if (field === 'cardNumber') {
-      val = val.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
+    setForm(prev => ({ ...prev, [field]: e.target.value }));
+  };
+
+  const buildTicketsForPayment = () =>
+    items.map((it) => ({
+      typeName: `${SECTION_NAMES[it.seat.section] || it.seat.section} · שורה ${it.seat.row} · מקום ${it.seat.number}`,
+      quantity: 1,
+      unitPrice: it.seat.price,
+    }));
+
+  const clearCancelQuery = () => {
+    if (searchParams.get('cancel')) {
+      setSearchParams((p) => {
+        p.delete('cancel');
+        return p;
+      });
     }
-    if (field === 'cardExpiry') {
-      val = val.replace(/\D/g, '').slice(0, 4);
-      if (val.length >= 3) val = val.slice(0, 2) + '/' + val.slice(2);
-    }
-    if (field === 'cardCvv') val = val.replace(/\D/g, '').slice(0, 4);
-    setForm(prev => ({ ...prev, [field]: val }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!eventId) {
+      setPayError('אין אירוע פעיל ב-Convex. הפעלו seed, או הוסיפו VITE_CHECKOUT_EVENT_ID (מזהה אירוע מהלוח).');
+      return;
+    }
+    if (payMode === 'bit') {
+      if (!BIT_PHONE) {
+        setPayError('תשלום בביט לא הוגדר: הוסיפו VITE_BIT_PHONE ל-.env.local ופרסימו/י שוב (מספר לקבלת ביט).');
+        return;
+      }
+      setLoading(true);
+      setPayError(null);
+      try {
+        const { transactionId, grandTotal: gt, qrCode } = await createBitPending({
+          eventId,
+          buyerName: `${form.firstName} ${form.lastName}`.trim(),
+          buyerEmail: form.email.trim(),
+          buyerPhone: form.phone.trim(),
+          tickets: buildTicketsForPayment(),
+          couponCode: appliedCoupon?.code,
+        });
+        setLoading(false);
+        navigate('/confirmation?bit=1', {
+          state: {
+            method: 'bit' as const,
+            transactionId: String(transactionId),
+            qrCode,
+            grandTotal: gt,
+            payeePhone: BIT_PHONE,
+            payeeName: BIT_PAYEE_NAME,
+          },
+        });
+      } catch (err) {
+        setLoading(false);
+        setPayError(err instanceof Error ? err.message : 'לא ניתן לרשום הזמנה');
+      }
+      return;
+    }
+
+    if (grandTotal < STRIPE_MIN_NIS) {
+      setPayError(
+        `סליקה ב-Stripe אפשרית מ-₪${STRIPE_MIN_NIS} ומעלה (מגבלת Stripe). הוסיפו מושב, שינו מחיר, או בחרו תשלום בביט.`,
+      );
+      return;
+    }
+
     setLoading(true);
-    await new Promise(r => setTimeout(r, 1800));
-    clearCart();
-    navigate('/confirmation');
+    setPayError(null);
+    try {
+      const { url } = await createCheckout({
+        eventId,
+        buyerName: `${form.firstName} ${form.lastName}`.trim(),
+        buyerEmail: form.email.trim(),
+        buyerPhone: form.phone.trim(),
+        tickets: buildTicketsForPayment(),
+        couponCode: appliedCoupon?.code,
+      });
+      window.location.assign(url);
+    } catch (err) {
+      setLoading(false);
+      setPayError(err instanceof Error ? err.message : 'לא ניתן לפתוח תשלום');
+    }
   };
 
   if (items.length === 0) {
@@ -130,6 +206,31 @@ export default function CheckoutPage() {
         </button>
 
         <h1 className="text-2xl font-black mb-8" style={{ color: '#1a1a2e' }}>השלמת הרכישה</h1>
+
+        {searchParams.get('cancel') === '1' && (
+          <div
+            className="mb-6 rounded-2xl px-4 py-3 flex items-center justify-between gap-3"
+            style={{ background: '#fff7ed', border: '1px solid #fed7aa' }}
+          >
+            <p className="text-sm" style={{ color: '#9a3412' }}>
+              התשלום ב-Stripe בוטל. אפשר לנסות שוב או לחזור.
+            </p>
+            <button
+              type="button"
+              onClick={clearCancelQuery}
+              className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg"
+              style={{ background: '#ffedd5', color: '#9a3412' }}
+            >
+              סגור
+            </button>
+          </div>
+        )}
+
+        {payError && (
+          <div className="mb-6 rounded-2xl px-4 py-3 text-sm" style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c' }}>
+            {payError}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-8">
           {/* Form */}
@@ -263,88 +364,138 @@ export default function CheckoutPage() {
               )}
             </div>
 
-            {/* Payment */}
+            {/* אמצעי תשלום */}
             <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid #ddd6fe' }}>
-              <h2 className="font-black mb-5 flex items-center gap-2" style={{ color: '#1a1a2e' }}>
-                <CreditCard size={16} style={{ color: '#7c3aed' }} />
-                פרטי תשלום
-                <span className="flex items-center gap-1 mr-auto text-xs font-normal" style={{ color: '#9b8fb0' }}>
-                  <Lock size={12} />
-                  מאובטח SSL
-                </span>
-              </h2>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-semibold mb-1.5 block" style={{ color: '#6b5a8a' }}>מספר כרטיס</label>
-                  <input
-                    required
-                    value={form.cardNumber}
-                    onChange={handleChange('cardNumber')}
-                    style={{ ...inputStyle, fontFamily: 'monospace' }}
-                    placeholder="0000 0000 0000 0000"
-                    dir="ltr"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold mb-1.5 block" style={{ color: '#6b5a8a' }}>שם בעל הכרטיס</label>
-                  <input
-                    required
-                    value={form.cardName}
-                    onChange={handleChange('cardName')}
-                    style={inputStyle}
-                    placeholder="ISRAEL ISRAELI"
-                    dir="ltr"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold mb-1.5 block" style={{ color: '#6b5a8a' }}>תוקף</label>
-                    <input
-                      required
-                      value={form.cardExpiry}
-                      onChange={handleChange('cardExpiry')}
-                      style={{ ...inputStyle, fontFamily: 'monospace' }}
-                      placeholder="MM/YY"
-                      dir="ltr"
-                    />
+              <h2 className="font-black mb-4" style={{ color: '#1a1a2e' }}>איך לשלם</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                <button
+                  type="button"
+                  onClick={() => setPayMode('stripe')}
+                  className="rounded-2xl p-4 text-right transition-all"
+                  style={{
+                    border: payMode === 'stripe' ? '2px solid #7c3aed' : '1.5px solid #ddd6fe',
+                    background: payMode === 'stripe' ? '#f5f0ff' : 'white',
+                  }}
+                >
+                  <div className="flex items-center gap-2 font-bold" style={{ color: '#1a1a2e' }}>
+                    <CreditCard size={18} style={{ color: '#7c3aed' }} />
+                    כרטיס (Stripe)
                   </div>
-                  <div>
-                    <label className="text-xs font-semibold mb-1.5 block" style={{ color: '#6b5a8a' }}>CVV</label>
-                    <input
-                      required
-                      value={form.cardCvv}
-                      onChange={handleChange('cardCvv')}
-                      style={{ ...inputStyle, fontFamily: 'monospace' }}
-                      placeholder="000"
-                      dir="ltr"
-                    />
+                  <p className="text-xs mt-1.5" style={{ color: '#6b5a8a' }}>אשראי, Apple Pay — מעבר לדף מאובטח</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPayMode('bit')}
+                  className="rounded-2xl p-4 text-right transition-all"
+                  style={{
+                    border: payMode === 'bit' ? '2px solid #00a859' : '1.5px solid #ddd6fe',
+                    background: payMode === 'bit' ? '#ecfdf3' : 'white',
+                  }}
+                >
+                  <div className="flex items-center gap-2 font-bold" style={{ color: '#1a1a2e' }}>
+                    <Smartphone size={18} style={{ color: '#00a859' }} />
+                    ביט (בנתיים)
                   </div>
-                </div>
+                  <p className="text-xs mt-1.5" style={{ color: '#6b5a8a' }}>העברה ידנית — ללא API בנק, לאישור ידני</p>
+                </button>
               </div>
+
+              {payMode === 'stripe' && (
+                <div className="space-y-3">
+                  <p className="text-sm leading-relaxed flex items-start gap-2" style={{ color: '#6b5a8a' }}>
+                    <Lock size={14} className="shrink-0 mt-0.5" style={{ color: '#7c3aed' }} />
+                    לאסוף מספר כרטיס — רק ב-Stripe. ביטול/חיוב — לפי מדיניות המארגן.
+                  </p>
+                  {grandTotal < STRIPE_MIN_NIS && (
+                    <p
+                      className="rounded-xl px-3 py-2.5 text-xs leading-relaxed"
+                      style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e' }}
+                    >
+                      <strong>מינימום לסליקה ב-Stripe: ₪{STRIPE_MIN_NIS}</strong> (מגבלת Stripe; ₪1 לא עובר).
+                      בחרו <strong>ביט</strong> להזמנה נמוכה, או הוסיפו מושב / שינו מחיר.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {payMode === 'bit' && (
+                <div className="space-y-3 text-sm" style={{ color: '#1a1a2e' }}>
+                  <p className="flex items-start gap-2">
+                    <HelpCircle size={16} className="shrink-0 mt-0.5" style={{ color: '#00a859' }} />
+                    <span>
+                      <strong>תשלום בביט בנתיים:</strong> אחרי שליחת הטופס יופיעו הוראות, וההזמנה תירשם כ"ממתינה לאישור"
+                      (לא מעדכנים מכירות אוטומטית — המארגן מוודא בביט/במערכת).
+                    </span>
+                  </p>
+                  {BIT_PHONE ? (
+                    <ul className="list-disc list-inside space-y-1.5 pr-1 text-right" style={{ color: '#4a3f66' }}>
+                      <li>שלח/י <strong>₪{grandTotal.toLocaleString()}</strong> בביט למספר: <strong dir="ltr">{BIT_PAYEE_NAME}</strong> / <strong dir="ltr">{BIT_PHONE}</strong></li>
+                      <li>אם בביט מבקשים "למה" או "הודעה" — הדבק/י את קוד האסמכתה שיופיע בדף אחרי הרישום</li>
+                    </ul>
+                  ) : (
+                    <p className="rounded-xl px-3 py-2 text-xs" style={{ background: '#fff7ed', border: '1px solid #fed7aa', color: '#9a3412' }}>
+                      <strong>לא הוגדר מספר ביט באתר.</strong> הוסיפו <code className="font-mono">VITE_BIT_PHONE=05...</code> ו־
+                      <code className="font-mono pr-1">VITE_BIT_PAYEE_NAME=שם</code> בקובץ <code>.env.local</code> והפעילו dev מחדש.
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={
+                loading
+                || !eventId
+                || (firstActive === undefined && !envEvent)
+                || (payMode === 'bit' && !BIT_PHONE)
+                || (payMode === 'stripe' && grandTotal < STRIPE_MIN_NIS)
+              }
               className="w-full font-black py-4 rounded-full transition-all text-lg flex items-center justify-center gap-3"
-              style={loading
-                ? { background: '#ddd6fe', color: '#9b8fb0', cursor: 'not-allowed' }
-                : { background: '#ffd433', color: '#1a1a2e' }
+              style={
+                loading
+                || !eventId
+                || (firstActive === undefined && !envEvent)
+                || (payMode === 'bit' && !BIT_PHONE)
+                || (payMode === 'stripe' && grandTotal < STRIPE_MIN_NIS)
+                  ? { background: '#ddd6fe', color: '#9b8fb0', cursor: 'not-allowed' }
+                  : payMode === 'bit'
+                    ? { background: '#00c851', color: '#fff' }
+                    : { background: '#ffd433', color: '#1a1a2e' }
               }
             >
               {loading ? (
                 <>
                   <span className="w-5 h-5 border-2 border-current/30 border-t-current rounded-full animate-spin" />
-                  מעבד תשלום...
+                  {payMode === 'bit' ? 'רושמים…' : 'מכין מעבר לתשלום...'}
                 </>
+              ) : (firstActive === undefined && !envEvent) ? (
+                <>
+                  <Lock size={18} />
+                  טוען אירוע…
+                </>
+              ) : !eventId ? (
+                <>
+                  <Lock size={18} />
+                  אין אירוע לקישור
+                </>
+              ) : payMode === 'bit' && !BIT_PHONE ? (
+                <>הגדיר/י VITE_BIT_PHONE</>
+              ) : payMode === 'stripe' && grandTotal < STRIPE_MIN_NIS ? (
+                <>מינימום Stripe ₪{STRIPE_MIN_NIS} — או ביט</>
+              ) : payMode === 'bit' ? (
+                <>רישום הזמנה (ביט) — ₪{grandTotal.toLocaleString()}</>
               ) : (
                 <>
                   <Lock size={18} />
                   {discount > 0 ? (
-                    <>שלם ₪{grandTotal.toLocaleString()} <span style={{ textDecoration: 'line-through', opacity: 0.5, fontSize: '0.85em' }}>₪{(total + Math.round(total * 0.05)).toLocaleString()}</span></>
+                    <>המשך לתשלום ₪{grandTotal.toLocaleString()}{' '}
+                      <span style={{ textDecoration: 'line-through', opacity: 0.5, fontSize: '0.85em' }}>
+                        ₪{(total + Math.round(total * 0.05)).toLocaleString()}
+                      </span>
+                    </>
                   ) : (
-                    <>שלם ₪{grandTotal.toLocaleString()}</>
+                    <>המשך לתשלום ב-Stripe – ₪{grandTotal.toLocaleString()}</>
                   )}
                 </>
               )}
